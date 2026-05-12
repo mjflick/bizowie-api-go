@@ -1,6 +1,6 @@
 # bizowie-api-go
 
-Go client for [Bizowie's](https://bizowie.com) ERP API. Port of the Perl
+Go client for the [Bizowie](https://bizowie.com) Cloud ERP API. Port of the Perl
 [`WWW::Bizowie::API`](https://github.com/bizowie/WWW-Bizowie-API) module.
 
 - Zero dependencies (Go standard library only)
