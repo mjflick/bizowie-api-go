@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 )
@@ -24,10 +23,7 @@ type Options struct {
 	// Site is the hostname of your Bizowie instance (e.g. "mysite.bizowie.com").
 	// Required.
 	Site string
-	// V2 routes calls through the v2 endpoint (/bz/apiv2/call/). Recommended
-	// for new integrations.
-	V2 bool
-	// APIVersion is the API version sent with each v2 request. Defaults to
+	// APIVersion is the API version sent with each request. Defaults to
 	// "1.00" when empty.
 	APIVersion string
 	// Debug, if true, logs the raw HTTP body to stderr when the response
@@ -43,7 +39,6 @@ type API struct {
 	apiKey     string
 	secretKey  string
 	site       string
-	v2         bool
 	apiVersion string
 	debug      bool
 	client     *http.Client
@@ -81,71 +76,22 @@ func New(opts Options) (*API, error) {
 		apiKey:     opts.APIKey,
 		secretKey:  opts.SecretKey,
 		site:       opts.Site,
-		v2:         opts.V2,
 		apiVersion: opts.APIVersion,
 		debug:      opts.Debug,
 		client:     client,
 	}, nil
 }
 
-// Call makes an API call. It dispatches to the v1 or v2 endpoint based on
-// Options.V2.
+// Call makes an API call against the v2 endpoint (/bz/apiv2/call/).
 //
 // Call does not return an error for HTTP-level failures (4xx/5xx). Those are
 // surfaced via Response.Success == 0 and whatever the server returned in
 // Response.Data. Only transport-level failures (DNS, connection refused, TLS
 // errors, context cancellation) are returned as errors.
 //
-// In v2 mode, APIKey/SecretKey/APIVersion are injected automatically — don't
-// include them in params.
+// APIKey/SecretKey/APIVersion are injected automatically — don't include them
+// in params.
 func (a *API) Call(ctx context.Context, method string, params map[string]any) (*Response, error) {
-	if a.v2 {
-		return a.callV2(ctx, method, params)
-	}
-	return a.callV1(ctx, method, params)
-}
-
-func (a *API) callV1(ctx context.Context, method string, params map[string]any) (*Response, error) {
-	if method == "" {
-		return nil, errors.New("[Bizowie::API] fatal error: no method given")
-	}
-
-	if params == nil {
-		params = map[string]any{}
-	}
-	requestJSON, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("encoding params: %w", err)
-	}
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	for _, field := range []struct{ name, value string }{
-		{"api_key", a.apiKey},
-		{"secret_key", a.secretKey},
-		{"site", a.site},
-		{"request", string(requestJSON)},
-	} {
-		if err := writer.WriteField(field.name, field.value); err != nil {
-			return nil, fmt.Errorf("building multipart body: %w", err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("closing multipart body: %w", err)
-	}
-
-	url := fmt.Sprintf("https://%s/bz/api/%s", a.site, method)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("User-Agent", userAgent)
-
-	return a.do(req)
-}
-
-func (a *API) callV2(ctx context.Context, method string, params map[string]any) (*Response, error) {
 	if method == "" {
 		return nil, errors.New("[Bizowie::API] fatal error: no method given")
 	}

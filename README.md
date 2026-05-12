@@ -4,7 +4,7 @@ Go client for the [Bizowie](https://bizowie.com) Cloud ERP API. Port of the Perl
 [`WWW::Bizowie::API`](https://github.com/bizowie/WWW-Bizowie-API) module.
 
 - Zero dependencies (Go standard library only)
-- Supports both the v1 and v2 API endpoints
+- Targets the v2 API endpoint (`/bz/apiv2/call/`)
 - Context-aware (cancellation / deadlines via `context.Context`)
 
 ## Requirements
@@ -39,7 +39,6 @@ func main() {
 		APIKey:    "02cc7058-cd22-4c8e-ad7c-a8f3f2a64bd0",
 		SecretKey: "58c57abc-1e16-3571-bb35-73876bcef746",
 		Site:      "mysite.bizowie.com",
-		V2:        true, // recommended for new integrations
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -73,21 +72,20 @@ Creates a client. Returns an error if `APIKey`, `SecretKey`, or `Site` is empty.
 | `APIKey`      | `string`        | yes      | Your Bizowie API key.                                                         |
 | `SecretKey`   | `string`        | yes      | Your Bizowie secret key.                                                      |
 | `Site`        | `string`        | yes      | Hostname of your Bizowie instance (e.g. `mysite.bizowie.com`).                |
-| `V2`          | `bool`          | no       | Route calls through the v2 endpoint (`/bz/apiv2/call/`). Recommended.         |
-| `APIVersion`  | `string`        | no       | API version sent with each v2 request. Defaults to `"1.00"` when empty.       |
+| `APIVersion`  | `string`        | no       | API version sent with each request. Defaults to `"1.00"` when empty.          |
 | `Debug`       | `bool`          | no       | Log the raw HTTP body to stderr when the response can't be parsed as JSON.    |
 | `HTTPClient`  | `*http.Client`  | no       | Override the underlying HTTP client. Defaults to `http.DefaultClient`.        |
 
 ### `(a *API) Call(ctx context.Context, method string, params map[string]any) (*Response, error)`
 
-Makes an API call.
+Makes an API call against `https://{site}/bz/apiv2/call/{method}`.
 
 - `ctx` — standard `context.Context`. Cancel it to abort an in-flight call.
-- `method` — path to the API method (everything after `/bz/api/` for v1 or
-  `/bz/apiv2/call/` for v2). Returns an error if empty.
+- `method` — path to the API method (everything after `/bz/apiv2/call/`).
+  Returns an error if empty.
 - `params` — `map[string]any` of parameters; JSON-encoded for you. May be
-  `nil`. In v2 mode, `api_key` / `secret_key` / `api_version` are injected
-  automatically — don't include them.
+  `nil`. `api_key` / `secret_key` / `api_version` are injected automatically
+  — don't include them.
 
 ### `Response`
 
@@ -150,17 +148,6 @@ bz, _ := bizowie.New(bizowie.Options{
     HTTPClient: &http.Client{Timeout: 10 * time.Second},
 })
 ```
-
-## v1 vs v2
-
-| Aspect          | v1 (default)                                       | v2 (`V2: true`)                                    |
-| --------------- | -------------------------------------------------- | -------------------------------------------------- |
-| Endpoint        | `https://{site}/bz/api/{method}`                   | `https://{site}/bz/apiv2/call/{method}`            |
-| Auth            | Sent as separate multipart form fields             | Injected into the JSON request body                |
-| Body            | `multipart/form-data` with a `request` JSON field  | Raw JSON body with `Content-Type: form-data`       |
-| `api_version`   | not sent                                           | sent (defaults to `"1.00"`)                        |
-
-v2 is recommended for new integrations.
 
 ## License
 

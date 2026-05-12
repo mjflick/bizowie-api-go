@@ -53,7 +53,7 @@ type roundTripper func(*http.Request) (*http.Response, error)
 
 func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestCall_v1_multipartShape(t *testing.T) {
+func TestCall_payloadShape(t *testing.T) {
 	var gotReq *http.Request
 	var gotBody []byte
 
@@ -74,27 +74,34 @@ func TestCall_v1_multipartShape(t *testing.T) {
 		HTTPClient: client,
 	})
 
-	res, err := bz.Call(context.Background(), "databases/add_note/3/10/123",
-		map[string]any{"comment": "hi"})
+	res, err := bz.Call(context.Background(), "some/method",
+		map[string]any{"foo": "bar"})
 	if err != nil {
 		t.Fatalf("call returned error: %v", err)
 	}
 
-	if got, want := gotReq.URL.String(), "https://example.com/bz/api/databases/add_note/3/10/123"; got != want {
+	if got, want := gotReq.URL.String(), "https://example.com/bz/apiv2/call/some/method"; got != want {
 		t.Fatalf("url = %q, want %q", got, want)
 	}
-	if !strings.HasPrefix(gotReq.Header.Get("Content-Type"), "multipart/form-data;") {
-		t.Fatalf("content-type = %q, want multipart/form-data", gotReq.Header.Get("Content-Type"))
+	if got := gotReq.Header.Get("Content-Type"); got != "form-data" {
+		t.Fatalf("content-type = %q, want form-data", got)
 	}
 	if got := gotReq.Header.Get("User-Agent"); got != "Bizowie::API" {
 		t.Fatalf("user-agent = %q, want Bizowie::API", got)
 	}
 
-	body := string(gotBody)
-	for _, want := range []string{`name="api_key"`, "k\r\n", `name="secret_key"`, "s\r\n", `name="site"`, "example.com\r\n", `name="request"`, `"comment":"hi"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("multipart body missing %q\nbody:\n%s", want, body)
-		}
+	var payload map[string]any
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("body is not JSON: %v\nbody: %s", err, gotBody)
+	}
+	if payload["api_key"] != "k" || payload["secret_key"] != "s" {
+		t.Errorf("auth not injected: %+v", payload)
+	}
+	if payload["api_version"] != "1.00" {
+		t.Errorf("api_version = %v, want 1.00", payload["api_version"])
+	}
+	if payload["foo"] != "bar" {
+		t.Errorf("user param dropped: %+v", payload)
 	}
 
 	if res.Success != 1 {
@@ -105,55 +112,6 @@ func TestCall_v1_multipartShape(t *testing.T) {
 	}
 	if _, leaked := res.Data["success"]; leaked {
 		t.Error("success field leaked into data")
-	}
-}
-
-func TestCall_v2_payloadShape(t *testing.T) {
-	var gotReq *http.Request
-	var gotBody []byte
-
-	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
-		gotReq = r
-		gotBody, _ = io.ReadAll(r.Body)
-		return &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(`{"success":1}`)),
-			Header:     http.Header{},
-		}, nil
-	})}
-
-	bz, _ := New(Options{
-		APIKey:     "k",
-		SecretKey:  "s",
-		Site:       "example.com",
-		V2:         true,
-		HTTPClient: client,
-	})
-
-	if _, err := bz.Call(context.Background(), "some/method",
-		map[string]any{"foo": "bar"}); err != nil {
-		t.Fatalf("call returned error: %v", err)
-	}
-
-	if got, want := gotReq.URL.String(), "https://example.com/bz/apiv2/call/some/method"; got != want {
-		t.Fatalf("url = %q, want %q", got, want)
-	}
-	if got := gotReq.Header.Get("Content-Type"); got != "form-data" {
-		t.Fatalf("content-type = %q, want form-data", got)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(gotBody, &payload); err != nil {
-		t.Fatalf("v2 body is not JSON: %v\nbody: %s", err, gotBody)
-	}
-	if payload["api_key"] != "k" || payload["secret_key"] != "s" {
-		t.Errorf("auth not injected: %+v", payload)
-	}
-	if payload["api_version"] != "1.00" {
-		t.Errorf("api_version = %v, want 1.00", payload["api_version"])
-	}
-	if payload["foo"] != "bar" {
-		t.Errorf("user param dropped: %+v", payload)
 	}
 }
 
@@ -180,10 +138,12 @@ func TestCall_unprocessedOnNonJSON(t *testing.T) {
 }
 
 // Verifies real HTTP transport round-trip with httptest.
-func TestCall_integration_v1(t *testing.T) {
+func TestCall_integration(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseMultipartForm(1 << 20)
-		_, _ = io.WriteString(w, `{"success":1,"echo":"`+r.FormValue("api_key")+`"}`)
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		_, _ = io.WriteString(w, `{"success":1,"echo":"`+payload["api_key"].(string)+`"}`)
 	}))
 	defer srv.Close()
 
@@ -191,7 +151,6 @@ func TestCall_integration_v1(t *testing.T) {
 	bz, _ := New(Options{APIKey: "abc", SecretKey: "xyz", Site: u.Host})
 
 	// Override the scheme to http for the test server (the client hardcodes https).
-	// Easier: just point the client at the test server via HTTPClient that rewrites the URL.
 	bz.client = &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
 		r.URL.Scheme = "http"
 		r.URL.Host = u.Host
