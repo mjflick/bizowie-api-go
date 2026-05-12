@@ -1,3 +1,3 @@
-module github.com/bizowie/bizowie-api-go
+module github.com/mjflick/bizowie-api-go
 
 go 1.22
